@@ -1,0 +1,419 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+@keyframes tp-fade-up {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+html, body {
+  background: transparent;
+  overflow: hidden;
+}
+
+#root {
+  width: fit-content;
+  height: fit-content;
+}
+
+.tp-outer {
+  display: inline-block;
+  padding: 10px;
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+}
+
+.tp-card {
+  width: 380px;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 20px 50px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.06);
+  transition: background 0.2s ease;
+  user-select: none;
+}
+
+.tp-dark {
+  box-shadow: 0 20px 50px rgba(0,0,0,0.5), 0 2px 8px rgba(0,0,0,0.3);
+}
+
+/* reset only what App.css forces onto every button/input */
+.tp-card button,
+.tp-card input,
+.tp-card select {
+  border: none;
+  padding: 0;
+  background-color: transparent;
+  box-shadow: none;
+}
+
+.tp-card button { cursor: pointer; }
+
+/* ── Title bar ── */
+.tp-titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 10px 14px 8px 16px;
+}
+
+.tp-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.tp-titlebar-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+}
+
+.tp-icon-btn,
+.tp-close-btn {
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+  transition: all .15s ease;
+  flex: none;
+}
+
+.tp-icon-btn:hover  { background: var(--tp-hover) !important; transform: scale(1.08); }
+.tp-close-btn:hover { background: var(--tp-close-hover) !important; color: var(--tp-close-ink) !important; }
+
+/* manual-mode-active indicator, layered onto .tp-icon-btn */
+.tp-icon-active { color: #2ea0da !important; background: rgba(46,160,218,0.14) !important; }
+.tp-icon-active:hover { background: rgba(46,160,218,0.28) !important; }
+
+/* ── Language bar ── */
+.tp-lang-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 14px 10px;
+}
+
+/* swap button — always visible so there's a consistent place to look for
+   it; only lights up (and becomes clickable) once the first language is a
+   concrete pick, since autodetect has nothing to swap into the second slot */
+.tp-lang-refresh {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--tp-ink);
+  opacity: 0.3;
+  cursor: default;
+  transition: all .15s ease;
+}
+
+.tp-lang-refresh-active {
+  opacity: 1;
+  color: #2ea0da;
+  background: rgba(46,160,218,0.14);
+  cursor: pointer;
+}
+
+.tp-lang-refresh-active:hover { background: rgba(46,160,218,0.28); }
+
+/* ── Divider ── */
+.tp-divider { height: 1px; margin: 0 14px; }
+
+/* ── Block ── */
+.tp-block { padding: 12px 16px; }
+
+.tp-textarea {
+  width: 100%;
+  min-height: 64px;
+  border: none;
+  outline: none;
+  resize: none;
+  background: transparent;
+  font-size: 14.5px;
+  line-height: 1.5;
+  font-family: inherit;
+  padding: 0;
+  box-sizing: border-box;
+  box-shadow: none;
+}
+
+.tp-textarea::placeholder { opacity: 0.4; }
+
+.tp-char-count {
+  text-align: right;
+  font-size: 11px;
+  margin-top: 4px;
+}
+
+.tp-output {
+  min-height: 64px;
+  font-size: 14.5px;
+  line-height: 1.5;
+  transition: color .15s ease;
+}
+
+.tp-output-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 8px;
+}
+
+.tp-detected { font-size: 11.5px; }
+
+.tp-copy {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 6px !important;
+  color: #ffffff !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  padding: 6px 13px !important;
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(46,160,218,0.4) !important;
+  transition: all .15s ease;
+}
+
+.tp-copy:not(:disabled):hover  { filter: brightness(1.08); transform: translateY(-1px); box-shadow: 0 3px 8px rgba(46,160,218,.45) !important; }
+.tp-copy:not(:disabled):active { transform: scale(.96); }
+
+/* ── No-setup banner ── */
+.tp-banner {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  padding: 8px 16px;
+}
+
+/* ── Output loading / error ── */
+.tp-output-wrap { min-height: 64px; }
+
+.tp-loader {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  min-height: 64px;
+}
+
+.tp-error {
+  font-size: 12px;
+  line-height: 1.5;
+  min-height: 64px;
+}
+
+@keyframes tp-spin { to { transform: rotate(360deg); } }
+.tp-spin { animation: tp-spin .8s linear infinite; }
+
+/* ── Settings view ── */
+.tp-settings-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 4px 16px 18px;
+  animation: tp-fade-up .15s ease;
+}
+
+.tp-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tp-field-label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.tp-text-input,
+.tp-hotkey-input {
+  width: 100%;
+  border-radius: 7px !important;
+  font-size: 13px;
+  font-family: inherit;
+  padding: 8px 10px !important;
+  outline: none;
+  box-sizing: border-box;
+  transition: border-color .15s ease;
+}
+
+.tp-hotkey-input { text-align: left; cursor: pointer; font-weight: 500; }
+
+.tp-text-input:focus { border-color: #2ea0da !important; }
+
+.tp-field-hint {
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.tp-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.tp-switch {
+  position: relative;
+  flex: none;
+  width: 34px;
+  height: 19px;
+  border-radius: 999px !important;
+  transition: background-color .15s ease;
+}
+
+.tp-switch-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.25);
+  transition: transform .15s ease;
+}
+
+.tp-hint-link {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.tp-hint-link:hover { filter: brightness(1.15); }
+
+/* ── Language combobox ── */
+.tp-combo { position: relative; }
+
+.tp-lang-bar .tp-combo { flex: 1; min-width: 0; }
+
+.tp-combo-trigger {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  border-radius: 7px !important;
+  font-size: 13px;
+  font-family: inherit;
+  padding: 8px 10px !important;
+  outline: none;
+  box-sizing: border-box;
+  text-align: left;
+  transition: border-color .15s ease;
+}
+
+.tp-combo-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tp-combo-chevron { flex: none; transition: transform .15s ease; }
+
+.tp-combo-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  z-index: 20;
+  border-radius: 8px !important;
+  overflow: hidden;
+  box-shadow: 0 6px 16px rgba(0,0,0,0.12);
+  animation: tp-fade-up .12s ease;
+}
+
+.tp-dark .tp-combo-panel { box-shadow: 0 10px 24px rgba(0,0,0,0.45); }
+
+.tp-combo-search-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+}
+
+.tp-combo-search {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  font-size: 12.5px;
+  font-family: inherit;
+  padding: 8px 0 !important;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.tp-combo-search::placeholder { opacity: 0.45; }
+
+.tp-combo-list {
+  max-height: 168px;
+  overflow-y: auto;
+  padding: 4px;
+}
+
+.tp-combo-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+  padding: 7px 9px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.tp-combo-option span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.tp-combo-empty {
+  font-size: 12px;
+  padding: 10px;
+  text-align: center;
+}
+
+.tp-save-btn {
+  border-radius: 7px !important;
+  color: #fff !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  padding: 9px !important;
+  cursor: pointer;
+  margin-top: 4px;
+  transition: filter .15s ease;
+}
+
+.tp-save-btn:hover { filter: brightness(1.08); }
+
+/* ── Scrollbar ── */
+.tp-scroll { scrollbar-width: thin; scrollbar-color: var(--tp-scroll-thumb) transparent; overflow-x: hidden; }
+.tp-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
+.tp-scroll::-webkit-scrollbar-track { background: transparent; }
+.tp-scroll::-webkit-scrollbar-thumb { background: var(--tp-scroll-thumb); border-radius: 8px; border: 2px solid transparent; background-clip: content-box; }
+.tp-scroll::-webkit-scrollbar-thumb:hover { background: var(--tp-scroll-thumb-hover); background-clip: content-box; }
+.tp-scroll::-webkit-scrollbar-corner { background: transparent; }
+
+/* ── Focus rings ── */
+.tp-card button:focus { outline: none; }
+.tp-icon-btn:focus-visible, .tp-close-btn:focus-visible,
+.tp-copy:focus-visible, .tp-save-btn:focus-visible { outline: none; box-shadow: 0 0 0 2px rgba(46,160,218,.35); }
