@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
+import { getCurrentWindow, LogicalPosition, LogicalSize } from "@tauri-apps/api/window";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { enable as enableAutostart, disable as disableAutostart, isEnabled as isAutostartEnabled } from "@tauri-apps/plugin-autostart";
@@ -248,17 +248,54 @@ export default function TranslatePage() {
 
   // keep the frameless window sized to the outer wrapper's full footprint
   // (offsetWidth/offsetHeight, not contentRect, so the shadow-bleed padding
-  // is included and the window never clips or scrolls its own content)
+  // is included and the window never clips or scrolls its own content).
+  // setSize() alone anchors on the top-left corner, so every content-driven
+  // resize would otherwise nudge the window off-center (compounding over many
+  // opens into a noticeable drift toward the top-left) — re-anchor on the
+  // window's own current center instead so a resize never moves it visually.
+  // Each resize is a read-current-geometry-then-write operation spanning
+  // several IPC round trips, so overlapping ResizeObserver callbacks (e.g. the
+  // initial mount notification immediately followed by the popup-shown state
+  // reset) must be serialized — otherwise a slower call can resolve after a
+  // faster, more up-to-date one and clobber it with stale numbers.
   useEffect(() => {
     const el = outerRef.current;
     if (!el) return;
+    const win = getCurrentWindow();
+    let cancelled = false;
+    let chain = Promise.resolve();
     const observer = new ResizeObserver(() => {
-      getCurrentWindow()
-        .setSize(new LogicalSize(Math.ceil(el.offsetWidth), Math.ceil(el.offsetHeight)))
-        .catch(() => {});
+      const newWidth = Math.ceil(el.offsetWidth);
+      const newHeight = Math.ceil(el.offsetHeight);
+      chain = chain.then(async () => {
+        if (cancelled) return;
+        try {
+          const [scale, position, size] = await Promise.all([
+            win.scaleFactor(),
+            win.outerPosition(),
+            win.outerSize(),
+          ]);
+          if (cancelled) return;
+          const logicalPos = position.toLogical(scale);
+          const logicalSize = size.toLogical(scale);
+          const centerX = logicalPos.x + logicalSize.width / 2;
+          const centerY = logicalPos.y + logicalSize.height / 2;
+          await win.setSize(new LogicalSize(newWidth, newHeight));
+          if (cancelled) return;
+          await win.setPosition(new LogicalPosition(
+            Math.round(centerX - newWidth / 2),
+            Math.round(centerY - newHeight / 2),
+          ));
+        } catch {
+          // not running inside a Tauri webview, or window API unavailable
+        }
+      });
     });
     observer.observe(el);
-    return () => observer.disconnect();
+    return () => {
+      cancelled = true;
+      observer.disconnect();
+    };
   }, [view]);
 
   // focus the input on first launch and every time the popup is shown again
