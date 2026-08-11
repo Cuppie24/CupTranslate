@@ -196,6 +196,26 @@ async fn get_languages(api_key: String) -> Result<Vec<LanguageInfo>, String> {
     Ok(languages)
 }
 
+// resizes and re-centers in one native call so the frontend never has to
+// derive "center" from the window's own current (potentially already
+// rounding-drifted) position — center() always recomputes fresh from the
+// monitor's absolute bounds, so nothing can accumulate across repeated calls
+#[tauri::command]
+fn resize_and_center(window: tauri::WebviewWindow, width: f64, height: f64) -> Result<(), String> {
+    let scale_before = window.scale_factor();
+    window
+        .set_size(tauri::LogicalSize::new(width, height))
+        .map_err(|e| e.to_string())?;
+    window.center().map_err(|e| e.to_string())?;
+    if let (Ok(pos), Ok(size)) = (window.outer_position(), window.outer_size()) {
+        log_debug(&window, format!(
+            "[resize] requested={}x{} (logical) window_scale_before={:?} window_scale_after={:?} outer_pos=({}, {}) outer_size={}x{}",
+            width, height, scale_before, window.scale_factor(), pos.x, pos.y, size.width, size.height,
+        ));
+    }
+    Ok(())
+}
+
 #[tauri::command]
 fn set_hotkey(app: tauri::AppHandle, accelerator: String) -> Result<(), String> {
     app.global_shortcut()
@@ -207,13 +227,62 @@ fn set_hotkey(app: tauri::AppHandle, accelerator: String) -> Result<(), String> 
     Ok(())
 }
 
+// TEMPORARY: mirrors every debug line to stderr (for `tauri dev`) and to the
+// frontend's in-app debug panel via a "debug-log" event (for release/MSI
+// builds, which have no attached console) — remove once the off-center bug
+// report is resolved
+fn log_debug(window: &tauri::WebviewWindow, msg: String) {
+    eprintln!("{msg}");
+    let _ = window.emit("debug-log", msg);
+}
+
 // emits "popup-shown" so the frontend can tell an actual fresh popup apart
 // from an ordinary OS focus event and clear the input/translation for it
 fn show_main_window(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
-        let _ = window.center();
+        // window.center() centers on whichever monitor the window itself is
+        // currently sitting on, not on the monitor the user is actually
+        // looking at. On a single-monitor machine those are the same thing,
+        // but on a multi-monitor setup the popup's "home" monitor never
+        // changes unless it's manually dragged there, so on mixed-DPI rigs
+        // (e.g. a 150%-scaled laptop panel plus a 100% external display) it
+        // keeps reopening on its home monitor even while the user works on
+        // the other one — which looks like a large, constant jump off-center
+        // rather than a real centering bug. Center on the cursor's monitor
+        // instead so it always appears where the user actually is.
+        let centered = (|| -> tauri::Result<()> {
+            let cursor = window.cursor_position()?;
+            let monitor = window
+                .monitor_from_point(cursor.x, cursor.y)?
+                .or(window.current_monitor()?)
+                .ok_or(tauri::Error::FailedToReceiveMessage)?;
+            let size = window.outer_size()?;
+            let monitor_pos = monitor.position();
+            let monitor_size = monitor.size();
+            let x = monitor_pos.x + (monitor_size.width as i32 - size.width as i32) / 2;
+            let y = monitor_pos.y + (monitor_size.height as i32 - size.height as i32) / 2;
+            log_debug(&window, format!(
+                "[show] cursor=({}, {}) monitor={:?} monitor_pos=({}, {}) monitor_size={}x{} monitor_scale={} window_scale={:?} outer_size={}x{} target=({}, {})",
+                cursor.x, cursor.y,
+                monitor.name(),
+                monitor_pos.x, monitor_pos.y,
+                monitor_size.width, monitor_size.height,
+                monitor.scale_factor(),
+                window.scale_factor(),
+                size.width, size.height,
+                x, y,
+            ));
+            window.set_position(tauri::PhysicalPosition::new(x, y))
+        })();
+        if let Err(e) = &centered {
+            log_debug(&window, format!("[show] cursor-based centering failed, falling back to center(): {e}"));
+            let _ = window.center();
+        }
         let _ = window.show();
         let _ = window.set_focus();
+        if let (Ok(pos), Ok(size)) = (window.outer_position(), window.outer_size()) {
+            log_debug(&window, format!("[show] after show(): outer_pos=({}, {}) outer_size={}x{}", pos.x, pos.y, size.width, size.height));
+        }
         let _ = window.emit("popup-shown", ());
     }
 }
@@ -250,7 +319,7 @@ pub fn run() {
                 })
                 .build(),
         )
-        .invoke_handler(tauri::generate_handler![translate, get_languages, set_hotkey, detect_language])
+        .invoke_handler(tauri::generate_handler![translate, get_languages, set_hotkey, detect_language, resize_and_center])
         .setup(|app| {
             let show_hide = MenuItem::with_id(app, "show_hide", "Show/Hide", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { getCurrentWindow, LogicalPosition, LogicalSize } from "@tauri-apps/api/window";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { enable as enableAutostart, disable as disableAutostart, isEnabled as isAutostartEnabled } from "@tauri-apps/plugin-autostart";
@@ -8,7 +8,7 @@ import "./TranslatePage.css";
 import {
   Sun, Moon, X, Copy, Check, Loader2,
   Settings as SettingsIcon, ArrowLeft, Key, Keyboard, RefreshCw, ArrowRightLeft, Pin, Power,
-  ChevronDown, Search,
+  ChevronDown, Search, Bug,
 } from "lucide-react";
 
 const FALLBACK_LANGUAGES = [
@@ -181,7 +181,13 @@ function LanguageCombobox({
 }
 
 export default function TranslatePage() {
-  const [view, setView] = useState<'translate' | 'settings'>('translate');
+  const [view, setView] = useState<'translate' | 'settings' | 'debug'>('translate');
+
+  // TEMPORARY: collects the backend's "debug-log" events (window-centering
+  // diagnostics) so they can be inspected from a release/MSI build, which has
+  // no attached console — remove once the off-center bug report is resolved
+  const [debugLogs, setDebugLogs] = useState<string[]>([]);
+  const [debugCopied, setDebugCopied] = useState(false);
 
   const [dark, setDark] = useState(() => localStorage.getItem('tp_dark') === '1');
   const [pinned, setPinned] = useState(() => localStorage.getItem('tp_pinned') === '1');
@@ -249,53 +255,24 @@ export default function TranslatePage() {
   // keep the frameless window sized to the outer wrapper's full footprint
   // (offsetWidth/offsetHeight, not contentRect, so the shadow-bleed padding
   // is included and the window never clips or scrolls its own content).
-  // setSize() alone anchors on the top-left corner, so every content-driven
-  // resize would otherwise nudge the window off-center (compounding over many
-  // opens into a noticeable drift toward the top-left) — re-anchor on the
-  // window's own current center instead so a resize never moves it visually.
-  // Each resize is a read-current-geometry-then-write operation spanning
-  // several IPC round trips, so overlapping ResizeObserver callbacks (e.g. the
-  // initial mount notification immediately followed by the popup-shown state
-  // reset) must be serialized — otherwise a slower call can resolve after a
-  // faster, more up-to-date one and clobber it with stale numbers.
+  // Resizing and re-centering happen together in one native Rust call
+  // (resize_and_center) rather than by reading the window's own current
+  // position from JS and computing a new center from it — that rolling,
+  // self-referential approach compounded physical/logical rounding error a
+  // little further every resize, which is why the popup would gradually
+  // drift off-center over a session. center() always recomputes fresh from
+  // the monitor's absolute bounds, so there's nothing left to accumulate.
   useEffect(() => {
     const el = outerRef.current;
     if (!el) return;
-    const win = getCurrentWindow();
-    let cancelled = false;
-    let chain = Promise.resolve();
     const observer = new ResizeObserver(() => {
-      const newWidth = Math.ceil(el.offsetWidth);
-      const newHeight = Math.ceil(el.offsetHeight);
-      chain = chain.then(async () => {
-        if (cancelled) return;
-        try {
-          const [scale, position, size] = await Promise.all([
-            win.scaleFactor(),
-            win.outerPosition(),
-            win.outerSize(),
-          ]);
-          if (cancelled) return;
-          const logicalPos = position.toLogical(scale);
-          const logicalSize = size.toLogical(scale);
-          const centerX = logicalPos.x + logicalSize.width / 2;
-          const centerY = logicalPos.y + logicalSize.height / 2;
-          await win.setSize(new LogicalSize(newWidth, newHeight));
-          if (cancelled) return;
-          await win.setPosition(new LogicalPosition(
-            Math.round(centerX - newWidth / 2),
-            Math.round(centerY - newHeight / 2),
-          ));
-        } catch {
-          // not running inside a Tauri webview, or window API unavailable
-        }
-      });
+      invoke('resize_and_center', {
+        width: Math.ceil(el.offsetWidth),
+        height: Math.ceil(el.offsetHeight),
+      }).catch(() => {});
     });
     observer.observe(el);
-    return () => {
-      cancelled = true;
-      observer.disconnect();
-    };
+    return () => observer.disconnect();
   }, [view]);
 
   // focus the input on first launch and every time the popup is shown again
@@ -321,6 +298,25 @@ export default function TranslatePage() {
           setEffectiveTargetCode(null);
           setError(null);
           setCopied(false);
+        })
+        .then(f => { unlisten = f; })
+        .catch(() => {});
+    } catch {
+      // not running inside a Tauri webview
+    }
+    return () => unlisten?.();
+  }, []);
+
+  // TEMPORARY: mirrors the backend's window-centering diagnostics into an
+  // in-app log so they can be copied out of a release/MSI build — remove
+  // once the off-center bug report is resolved
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    try {
+      getCurrentWindow()
+        .listen<string>('debug-log', event => {
+          const line = `${new Date().toISOString()} ${event.payload}`;
+          setDebugLogs(prev => (prev.length >= 500 ? [...prev.slice(-499), line] : [...prev, line]));
         })
         .then(f => { unlisten = f; })
         .catch(() => {});
@@ -618,14 +614,15 @@ export default function TranslatePage() {
       >
         {/* Title bar — also the window drag handle */}
         <div className="tp-titlebar" data-tauri-drag-region="true">
-          {view === 'settings' ? (
-            <button className="tp-icon-btn" style={{ color: inkMuted }} onClick={() => setView('translate')} title="Back">
+          {view !== 'translate' ? (
+            <button className="tp-icon-btn" style={{ color: inkMuted }} onClick={() => setView(view === 'debug' ? 'settings' : 'translate')} title="Back">
               <ArrowLeft size={14} />
             </button>
           ) : (
             <span className="tp-title" style={{ color: inkMuted }}>Translate</span>
           )}
           {view === 'settings' && <span className="tp-title" style={{ color: inkMuted }}>Settings</span>}
+          {view === 'debug' && <span className="tp-title" style={{ color: inkMuted }}>Debug Logs</span>}
           <div className="tp-titlebar-actions">
             {view === 'translate' && (
               <button
@@ -731,6 +728,64 @@ export default function TranslatePage() {
             <button className="tp-save-btn" style={{ background: accent }} onClick={saveSettings}>
               Save
             </button>
+            {/* TEMPORARY: entry point into the in-app debug log — remove once the off-center bug report is resolved */}
+            <button
+              className="tp-icon-btn"
+              style={{ color: inkFaint, gap: 6, width: '100%', justifyContent: 'center', marginTop: 4 }}
+              onClick={() => setView('debug')}
+              title="Debug logs"
+            >
+              <Bug size={12} /> Debug logs{debugLogs.length > 0 ? ` (${debugLogs.length})` : ''}
+            </button>
+          </div>
+        ) : view === 'debug' ? (
+          <div className="tp-settings-body">
+            <div className="tp-field-hint" style={{ color: inkFaint }}>
+              Window-centering diagnostics. Reproduce the off-center popup, then copy and share this log.
+            </div>
+            <pre
+              className="tp-scroll"
+              style={{
+                background: paperSub,
+                border: `1px solid ${border}`,
+                color: ink,
+                borderRadius: 8,
+                padding: 8,
+                fontSize: 10,
+                lineHeight: 1.4,
+                maxHeight: 260,
+                overflowY: 'auto',
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-all',
+                margin: 0,
+              }}
+            >
+              {debugLogs.length > 0 ? debugLogs.join('\n') : 'No logs yet — open/resize the popup to generate some.'}
+            </pre>
+            <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+              <button
+                className="tp-copy"
+                style={{ background: debugCopied ? '#1f9d55' : accent, flex: 1, justifyContent: 'center' }}
+                disabled={debugLogs.length === 0}
+                onClick={() => {
+                  writeText(debugLogs.join('\n')).then(() => {
+                    setDebugCopied(true);
+                    setTimeout(() => setDebugCopied(false), 1500);
+                  }).catch(() => {});
+                }}
+              >
+                {debugCopied ? <Check size={12} /> : <Copy size={12} />}
+                {debugCopied ? 'Copied!' : 'Copy logs'}
+              </button>
+              <button
+                className="tp-icon-btn"
+                style={{ color: inkFaint }}
+                onClick={() => setDebugLogs([])}
+                title="Clear"
+              >
+                Clear
+              </button>
+            </div>
           </div>
         ) : (
           <>
