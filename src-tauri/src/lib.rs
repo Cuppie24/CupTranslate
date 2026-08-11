@@ -257,16 +257,20 @@ fn show_main_window(app: &tauri::AppHandle) {
                 .or(window.current_monitor()?)
                 .ok_or(tauri::Error::FailedToReceiveMessage)?;
             let size = window.outer_size()?;
-            let monitor_pos = monitor.position();
-            let monitor_size = monitor.size();
-            let x = monitor_pos.x + (monitor_size.width as i32 - size.width as i32) / 2;
-            let y = monitor_pos.y + (monitor_size.height as i32 - size.height as i32) / 2;
+            // use the monitor's work area (excludes the taskbar), not its
+            // full size — window.center()/resize_and_center's center() call
+            // centers against the work area too, and mixing the two here
+            // made the popup visibly jump by half the taskbar height every
+            // time it resized right after being shown
+            let work_area = monitor.work_area();
+            let x = work_area.position.x + (work_area.size.width as i32 - size.width as i32) / 2;
+            let y = work_area.position.y + (work_area.size.height as i32 - size.height as i32) / 2;
             log_debug(&window, format!(
-                "[show] cursor=({}, {}) monitor={:?} monitor_pos=({}, {}) monitor_size={}x{} monitor_scale={} window_scale={:?} outer_size={}x{} target=({}, {})",
+                "[show] cursor=({}, {}) monitor={:?} work_area_pos=({}, {}) work_area_size={}x{} monitor_scale={} window_scale={:?} outer_size={}x{} target=({}, {})",
                 cursor.x, cursor.y,
                 monitor.name(),
-                monitor_pos.x, monitor_pos.y,
-                monitor_size.width, monitor_size.height,
+                work_area.position.x, work_area.position.y,
+                work_area.size.width, work_area.size.height,
                 monitor.scale_factor(),
                 window.scale_factor(),
                 size.width, size.height,
