@@ -196,6 +196,15 @@ async fn get_languages(api_key: String) -> Result<Vec<LanguageInfo>, String> {
     Ok(languages)
 }
 
+fn monitor_name(window: &tauri::WebviewWindow) -> String {
+    window
+        .current_monitor()
+        .ok()
+        .flatten()
+        .and_then(|m| m.name().cloned())
+        .unwrap_or_else(|| "?".to_string())
+}
+
 // resizes and re-centers in one native call so the frontend never has to
 // derive "center" from the window's own current (potentially already
 // rounding-drifted) position — center() always recomputes fresh from the
@@ -203,14 +212,31 @@ async fn get_languages(api_key: String) -> Result<Vec<LanguageInfo>, String> {
 #[tauri::command]
 fn resize_and_center(window: tauri::WebviewWindow, width: f64, height: f64) -> Result<(), String> {
     let scale_before = window.scale_factor();
+    let monitor_before = monitor_name(&window);
+    let pos_before = window.outer_position().ok();
+    let size_before = window.outer_size().ok();
+
     window
         .set_size(tauri::LogicalSize::new(width, height))
         .map_err(|e| e.to_string())?;
+    // scale/monitor right after set_size, BEFORE center() runs — isolates
+    // whether set_size() alone (still on the old monitor) or center()
+    // (which can hop monitors) is where a scale mismatch is introduced
+    let scale_after_set_size = window.scale_factor();
+    let monitor_after_set_size = monitor_name(&window);
+
     window.center().map_err(|e| e.to_string())?;
+    let scale_after_center = window.scale_factor();
+    let monitor_after_center = monitor_name(&window);
+
     if let (Ok(pos), Ok(size)) = (window.outer_position(), window.outer_size()) {
         log_debug(&window, format!(
-            "[resize] requested={}x{} (logical) window_scale_before={:?} window_scale_after={:?} outer_pos=({}, {}) outer_size={}x{}",
-            width, height, scale_before, window.scale_factor(), pos.x, pos.y, size.width, size.height,
+            "[resize] requested={}x{} (logical) before: monitor={} scale={:?} outer_pos={:?} outer_size={:?} | after set_size: monitor={} scale={:?} | after center: monitor={} scale={:?} outer_pos=({}, {}) outer_size={}x{}",
+            width, height,
+            monitor_before, scale_before, pos_before, size_before,
+            monitor_after_set_size, scale_after_set_size,
+            monitor_after_center, scale_after_center,
+            pos.x, pos.y, size.width, size.height,
         ));
     }
     Ok(())
@@ -355,11 +381,46 @@ pub fn run() {
             }
 
             if let Some(window) = app.get_webview_window("main") {
+                // one id per process launch — a repeat of this line in the
+                // (persisted, cross-remount) frontend log means the webview
+                // itself reloaded/remounted, not just that logs were cleared
+                log_debug(&window, format!(
+                    "[boot] pid={} started_at={:?}",
+                    std::process::id(),
+                    std::time::SystemTime::now(),
+                ));
+
                 let window_clone = window.clone();
                 window.on_window_event(move |event| {
-                    if let WindowEvent::CloseRequested { api, .. } = event {
-                        api.prevent_close();
-                        let _ = window_clone.hide();
+                    match event {
+                        WindowEvent::CloseRequested { api, .. } => {
+                            api.prevent_close();
+                            let _ = window_clone.hide();
+                        }
+                        // raw OS-driven notifications — logged independently of
+                        // our own resize_and_center/show_main_window calls, so
+                        // we can see DPI/monitor moves Windows makes on its own
+                        // (e.g. after set_position(), before our code reads
+                        // outer_position() back) that our own logging would miss
+                        WindowEvent::ScaleFactorChanged { scale_factor, new_inner_size, .. } => {
+                            log_debug(&window_clone, format!(
+                                "[event] ScaleFactorChanged scale_factor={} new_inner_size={}x{} monitor={}",
+                                scale_factor, new_inner_size.width, new_inner_size.height, monitor_name(&window_clone),
+                            ));
+                        }
+                        WindowEvent::Moved(pos) => {
+                            log_debug(&window_clone, format!(
+                                "[event] Moved outer_pos=({}, {}) monitor={}",
+                                pos.x, pos.y, monitor_name(&window_clone),
+                            ));
+                        }
+                        WindowEvent::Resized(size) => {
+                            log_debug(&window_clone, format!(
+                                "[event] Resized inner_size={}x{} monitor={}",
+                                size.width, size.height, monitor_name(&window_clone),
+                            ));
+                        }
+                        _ => {}
                     }
                 });
             }

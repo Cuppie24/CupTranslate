@@ -185,8 +185,28 @@ export default function TranslatePage() {
 
   // TEMPORARY: collects the backend's "debug-log" events (window-centering
   // diagnostics) so they can be inspected from a release/MSI build, which has
-  // no attached console — remove once the off-center bug report is resolved
-  const [debugLogs, setDebugLogs] = useState<string[]>([]);
+  // no attached console — remove once the off-center bug report is resolved.
+  // Persisted to localStorage (not just React state) because a WebView2
+  // reload — which a DPI/monitor change can trigger — remounts this
+  // component and silently wipes plain state; a gap in the persisted log
+  // with a repeated "[frontend] mounted" marker is direct proof that
+  // happened, vs. the user just perceiving logs as "cleared".
+  const DEBUG_LOG_KEY = 'tp_debug_logs';
+  const [debugLogs, setDebugLogs] = useState<string[]>(() => {
+    try {
+      const raw = localStorage.getItem(DEBUG_LOG_KEY);
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  });
+  const appendDebugLog = useCallback((line: string) => {
+    setDebugLogs(prev => {
+      const next = prev.length >= 500 ? [...prev.slice(-499), line] : [...prev, line];
+      try { localStorage.setItem(DEBUG_LOG_KEY, JSON.stringify(next)); } catch { /* ignore */ }
+      return next;
+    });
+  }, []);
   const [debugCopied, setDebugCopied] = useState(false);
 
   const [dark, setDark] = useState(() => localStorage.getItem('tp_dark') === '1');
@@ -311,12 +331,16 @@ export default function TranslatePage() {
   // in-app log so they can be copied out of a release/MSI build — remove
   // once the off-center bug report is resolved
   useEffect(() => {
+    // marks every mount of this component in the persisted log stream — if
+    // this line repeats without a matching backend "[boot]" line also
+    // repeating, the webview reloaded/remounted while the Rust process kept
+    // running (e.g. a DPI-triggered WebView2 reload), not a fresh app launch
+    appendDebugLog(`${new Date().toISOString()} [frontend] mounted`);
     let unlisten: (() => void) | undefined;
     try {
       getCurrentWindow()
         .listen<string>('debug-log', event => {
-          const line = `${new Date().toISOString()} ${event.payload}`;
-          setDebugLogs(prev => (prev.length >= 500 ? [...prev.slice(-499), line] : [...prev, line]));
+          appendDebugLog(`${new Date().toISOString()} ${event.payload}`);
         })
         .then(f => { unlisten = f; })
         .catch(() => {});
@@ -324,7 +348,7 @@ export default function TranslatePage() {
       // not running inside a Tauri webview
     }
     return () => unlisten?.();
-  }, []);
+  }, [appendDebugLog]);
 
   // Esc hides the popup, unless pinned
   useEffect(() => {
@@ -780,7 +804,10 @@ export default function TranslatePage() {
               <button
                 className="tp-icon-btn"
                 style={{ color: inkFaint }}
-                onClick={() => setDebugLogs([])}
+                onClick={() => {
+                  setDebugLogs([]);
+                  try { localStorage.removeItem(DEBUG_LOG_KEY); } catch { /* ignore */ }
+                }}
                 title="Clear"
               >
                 Clear
