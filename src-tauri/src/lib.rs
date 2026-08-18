@@ -226,8 +226,25 @@ fn resize_and_center(window: tauri::WebviewWindow, width: f64, height: f64) -> R
     let monitor_after_set_size = monitor_name(&window);
 
     window.center().map_err(|e| e.to_string())?;
-    let scale_after_center = window.scale_factor();
-    let monitor_after_center = monitor_name(&window);
+    let mut scale_after_center = window.scale_factor();
+    let mut monitor_after_center = monitor_name(&window);
+
+    // center() can land the window on a monitor with a different DPI than the
+    // one set_size() used to compute the physical pixel size — that physical
+    // size is never reconverted, so the window ends up the wrong size for its
+    // new monitor (confirmed via [resize]/[event] logs, see
+    // docs/window-centering-bug.md). Redo set_size()+center() once with the
+    // now-current scale if it changed; the second set_size() commits physical
+    // pixels using the correct (post-hop) scale, and re-centering keeps it
+    // aligned on that same monitor.
+    if scale_after_set_size.as_ref().ok().copied() != scale_after_center.as_ref().ok().copied() {
+        window
+            .set_size(tauri::LogicalSize::new(width, height))
+            .map_err(|e| e.to_string())?;
+        window.center().map_err(|e| e.to_string())?;
+        scale_after_center = window.scale_factor();
+        monitor_after_center = monitor_name(&window);
+    }
 
     if let (Ok(pos), Ok(size)) = (window.outer_position(), window.outer_size()) {
         log_debug(&window, format!(

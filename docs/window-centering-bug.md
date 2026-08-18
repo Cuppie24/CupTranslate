@@ -1,6 +1,6 @@
 # Popup window opens off-center (multi-monitor, mixed DPI)
 
-## Status: investigating
+## Status: fix implemented, awaiting real-rig confirmation
 
 ## Symptom
 
@@ -122,3 +122,37 @@ Changes made (no fix yet — instrumentation only, to catch it next time):
 build, correlate the `[frontend] mounted`/`[boot]` markers to confirm or rule
 out the reload theory, and check whether `[event] ScaleFactorChanged/Moved`
 fires between a `[show]` and the next `[resize]` on a bad open.
+
+### 2026-08-18 — confirmed the DPI-hop hypothesis from a fresh log, implemented the fix
+
+A new log (spanning 2026-08-12 through 2026-08-17, DISPLAY1 @ 100%/125%/150%,
+DISPLAY2 @ 100%) reproduces the exact mismatch predicted on 2026-08-11, e.g.:
+
+```
+09:16:39.745 [resize] requested=402x357 before: monitor=DISPLAY2 scale=Ok(1.5) outer_size=(401,355)
+             | after set_size: monitor=DISPLAY2 scale=Ok(1.0) | after center: monitor=DISPLAY2 scale=Ok(1.0)
+             outer_pos=(658, 248) outer_size=603x536
+```
+
+`set_size(402x357 logical)` committed physical pixels using the pre-hop scale
+(1.5) → 603x536 physical. `center()` then moved the window onto DISPLAY2
+(scale 1.0), but the already-committed 603x536 physical size was never
+reconverted, so the window renders ~1.5x too large/off-position for a
+100%-scale monitor. Every mid-log resize that crosses a DPI boundary shows
+the same pattern, confirming this is the actual bug (not `show_main_window`,
+already ruled out on 2026-08-11).
+
+**Fix implemented** in `resize_and_center`
+([src-tauri/src/lib.rs](../src-tauri/src/lib.rs)): after `set_size()` +
+`center()`, compare `scale_factor()` before vs. after `center()`. If `center()`
+hopped the window to a different-DPI monitor, redo `set_size()` (now using the
+correct, post-hop scale) followed by another `center()`. The existing
+`[resize]` log line's `after center` fields now reflect the *final* state, so
+if the retry fires, the logged `scale_after_center` will already match the
+monitor the window actually lands on.
+
+**Not yet done:** rebuild and reproduce on the real mixed-DPI multi-monitor
+rig to confirm the visible off-center jump is actually gone (this fix has
+only been `cargo check`-verified, not run against real hardware); once
+confirmed, remove the temporary `log_debug`/`[event]`/`[show]`/`[resize]`
+instrumentation per the note at the top of this file.
